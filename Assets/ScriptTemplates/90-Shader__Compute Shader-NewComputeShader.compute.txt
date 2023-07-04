@@ -1,0 +1,39 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+#include "UnityCG.cginc"
+
+struct Vertex
+{
+    uint id;
+    float3 position;
+    float4 color;
+};
+
+float PI  = 3.1415926;
+float PI2 = 6.2831853;
+float PIh = 1.5707963;
+
+// ================================================== cs fields
+
+Texture2D<float4> _InputTexture;
+RWTexture2D<float4> _OutputTexture;
+// RWStructuredBuffer<float4> _TexColor;
+RWStructuredBuffer<float> _Values;
+RWStructuredBuffer<Vertex> _Verteces;
+
+int _BufferSize;
+int _Width;
+int _Height;
+float _Ratio;
+
+[numthreads(32, 32, 1)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x + id.y * _Width;
+    // uint x = i % _Width;
+    // uint y = i / _Width;
+
+    float4 color = _InputTexture[id.xy];
+    _OutputTexture[id.xy] = color;
+}

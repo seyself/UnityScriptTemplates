@@ -1,0 +1,145 @@
+Shader "Custom/#NAME#"
+{
+    Properties
+    {
+        _Color ("Color", Color) = (1,1,1,1)
+        _MainTex ("Texture", 2D) = "white" {}
+        _Ratio("Ratio", Range(0, 1)) = 1.0
+    }
+    SubShader
+    {
+        Tags {
+            "Queue"="Transparent"
+            "IgnoreProjector"="True"
+            "RenderType"="Transparent"
+        }
+
+        LOD 200
+        ZWrite Off
+        Blend SrcAlpha OneMinusSrcAlpha
+
+        Pass
+        {
+            Cull Back
+
+            CGPROGRAM
+            #pragma require geometry
+            #pragma target 5.0
+            #pragma vertex vert
+            #pragma geometry geom
+            #pragma fragment frag
+            // make fog work
+            #pragma multi_compile_fog
+
+            #include "UnityCG.cginc"
+
+            struct appdata {
+                uint id : SV_VertexID;
+                float4 vertex : POSITION;
+                float3 normal : NORMAL;
+                float2 uv : TEXCOORD0;
+                float4 color : TEXCOORD1;
+            };
+
+            struct v2g
+            {
+                float id : TEXCOORD3;
+                float4 vertex : SV_POSITION;
+                float3 normal : TEXCOORD0;
+                float2 uv : TEXCOORD1;
+                float4 color : TEXCOORD2;
+            };
+
+            struct g2f
+            {
+                float4 vertex : SV_POSITION;
+                float2 uv : TEXCOORD0;
+                float4 color : TEXCOORD1;
+                UNITY_FOG_COORDS(1)
+            };
+
+            // struct Vertex
+            // {
+            //     uint id;
+            //     float3 position;
+            //     float4 color;
+            // };
+
+            sampler2D _MainTex;
+            float4 _MainTex_ST;
+            float4 _Color;
+            float _Ratio;
+            
+            // StructuredBuffer<Vertex> _Verteces;
+            // StructuredBuffer<float> _Values;
+
+            v2g vert (appdata v)
+            {
+                v2g o;
+                o.id = v.id;
+                o.vertex = UnityObjectToClipPos(v.vertex);
+                o.normal = v.normal;
+                o.uv = TRANSFORM_TEX(v.uv, _MainTex);
+                o.color = v.color;
+                UNITY_TRANSFER_FOG(o, o.vertex);
+                return o;
+            }
+
+
+            // point[1], line[2], triangle[3], lineadj[4], triangleadj[6]
+            
+            // [maxvertexcount(1)]
+            // void geom(point v2g input[1], inout TriangleStream<g2f> outStream)
+            // {
+            //     [unroll]
+            //     v2g v = input[0];
+            //     g2f o;
+            //     o.vertex = v.vertex;
+            //     o.uv = v.uv;
+            //     o.color = v.color;
+            //     outStream.Append(o);
+            //     outStream.RestartStrip();
+            // }
+            // [maxvertexcount(2)]
+            // void geom(line v2g input[2], inout TriangleStream<g2f> outStream)
+            // {
+            //     [unroll]
+            //     for(int i=0; i<2; i++)
+            //     {
+            //         v2g v = input[i];
+            //         g2f o;
+            //         o.vertex = v.vertex;
+            //         o.uv = v.uv;
+            //         o.color = v.color;
+            //         outStream.Append(o);
+            //     }
+            //     outStream.RestartStrip();
+            // }
+
+            [maxvertexcount(3)]
+            void geom(triangle v2g input[3], inout TriangleStream<g2f> outStream)
+            {
+                [unroll]
+                for(int i=0; i<3; i++)
+                {
+                    v2g v = input[i];
+                    g2f o;
+                    o.vertex = v.vertex;
+                    o.uv = v.uv;
+                    o.color = v.color;
+                    outStream.Append(o);
+                }
+                outStream.RestartStrip();
+            }
+
+            float4 frag (g2f i) : SV_Target
+            {
+                float4 col = tex2D(_MainTex, i.uv);
+                UNITY_APPLY_FOG(i.fogCoord, col);
+                return col;
+            }
+            ENDCG
+        }
+    }
+    FallBack "Diffuse"
+}

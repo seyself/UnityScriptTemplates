@@ -1,0 +1,236 @@
+﻿using System.Collections;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Threading;
+using UnityEngine;
+using UnityEngine.UI;
+using UnityEngine.Rendering;
+using UnityEngine.Experimental.Rendering;
+
+namespace App 
+{
+	[RequireComponent(typeof(MeshFilter), typeof(MeshRenderer))]
+	public class #SCRIPTNAME# : MonoBehaviour
+	{
+		[SerializeField] Camera _camera;
+		[SerializeField] Material _material;
+		[SerializeField] ComputeShader _computeShader;
+		[SerializeField] Texture2D _srcTexture;
+		RenderTexture _dstTexture;
+
+		[SerializeField] RawImage _dstTexturePreview;
+		[SerializeField, Range(0, 1)] float _ratio;
+
+		bool _isDisposed;
+		Thread _thread;
+
+		MeshFilter _meshFilter;
+        MeshRenderer _meshRenderer;
+		Mesh _mesh;
+        MaterialPropertyBlock _props;
+		
+		int _bufferSize = 1024 * 512;
+		int _threadSize;
+		int _threadGroupX;
+		int _threadGroupY;
+		int _threadGroupZ;
+
+		int _kernelIndex;
+		float[] _values;
+		Vertex[] _verteces;
+		
+
+		ComputeBuffer _floatBuffer;
+		ComputeBuffer _vertexBuffer;
+		
+
+		void Start ()
+		{
+			SetupParams();
+			SetupShader();
+			// StartThread();
+		}
+
+		void Update ()
+		{
+			if (_isDisposed) return;
+
+			UpdateBuffer();
+			UpdateShader();
+			UpdateDraw();
+			// DrawCommandBuffer();
+		}
+
+		void OnDestroy() 
+		{
+			Dispose();
+		}
+
+		void OnApplicationQuit() 
+		{
+			Dispose();
+		}
+
+		//=======
+
+		void StartThread()
+		{
+			_thread = new Thread( RunThreading );
+			_thread.IsBackground = true;
+			_thread.Start();
+		}
+
+		void RunThreading()
+		{
+			while(!_isDisposed) 
+			{
+
+				Thread.Sleep(10);
+			}
+		}
+
+		//========
+
+		void Dispose()
+		{
+			_isDisposed = true;
+
+			if (_floatBuffer != null) _floatBuffer.Release();
+			if (_vertexBuffer != null) _vertexBuffer.Release();
+
+			_floatBuffer = null;
+			_vertexBuffer = null;
+		}
+
+		void SetupParams() 
+		{
+			if (_camera == null) _camera = Camera.main;
+			_meshFilter = GetComponent<MeshFilter>();
+            _meshRenderer = GetComponent<MeshRenderer>();
+            _mesh = new Mesh();
+            _props = new MaterialPropertyBlock();
+            _meshFilter.mesh = _mesh;
+            if (_material == null) _material = _meshRenderer.material;
+			else _meshRenderer.material = _material;
+
+			_mesh.SetVertices( new List<Vector3>(new Vector3[_bufferSize]) );
+
+			_values = new float[_bufferSize];
+			_verteces = new Vertex[_bufferSize];
+			if (_srcTexture == null) _srcTexture = CreateTexture2D(1024, 1024);
+			_dstTexture = CreateRenderTexture(_srcTexture.width, _srcTexture.height);
+
+			if (_dstTexturePreview)
+			{
+				_dstTexturePreview.texture = _dstTexture;
+			}
+		}
+
+		void SetupShader() 
+		{
+			// get kernel index
+			_kernelIndex = _computeShader.FindKernel( "CSMain" );
+
+			// thread size
+			_threadSize = Mathf.CeilToInt((float)_bufferSize / 1024f);
+			_threadGroupX = 32;
+			_threadGroupY = Mathf.CeilToInt((float)_threadSize / 32);
+			_threadGroupZ = 1;
+
+			// create compute buffer
+			_floatBuffer = new ComputeBuffer( _bufferSize, sizeof(float) );
+			_vertexBuffer = new ComputeBuffer( _bufferSize, Marshal.SizeOf(typeof(Vertex)) );
+			
+			// set params
+			_computeShader.SetInt("_BufferSize", _bufferSize);
+			_computeShader.SetInt("_Width", _dstTexture.width);
+			_computeShader.SetInt("_Height", _dstTexture.height);
+			_computeShader.SetFloat("_Ratio", _ratio);
+			_computeShader.SetBuffer(_kernelIndex, "_Values", _floatBuffer);
+			_computeShader.SetBuffer(_kernelIndex, "_Verteces", _vertexBuffer);
+			_computeShader.SetTexture(_kernelIndex, "_InputTexture", _srcTexture);
+			_computeShader.SetTexture(_kernelIndex, "_OutputTexture", _dstTexture);
+		}
+
+		void UpdateBuffer()
+		{
+			_floatBuffer.SetData(_values);
+			_vertexBuffer.SetData(_verteces);
+		}
+
+		void UpdateShader() 
+		{
+			_computeShader.SetFloat("_Ratio", _ratio);
+			_computeShader.SetBuffer(_kernelIndex, "_Values", _floatBuffer);
+			_computeShader.SetBuffer(_kernelIndex, "_Verteces", _vertexBuffer);
+		}
+
+		void UpdateDraw() 
+		{
+			_computeShader.Dispatch(_kernelIndex, _threadGroupX, _threadGroupY, _threadGroupZ);
+			// _computeShader.Dispatch(_kernelIndex, _threadSize, 1, 1);
+            _material.SetBuffer("_Values", _floatBuffer);
+            _material.SetBuffer("_Verteces", _vertexBuffer);
+			// _material.SetPass(0);
+		}
+
+		void DrawCommandBuffer()
+		{
+			CommandBuffer cb = new CommandBuffer();
+            cb.name = "CommandBuffer";
+            cb.DrawProcedural(Matrix4x4.identity, _material, 0, MeshTopology.Points, 1);
+            _camera.AddCommandBuffer(CameraEvent.BeforeForwardOpaque, cb);
+		}
+
+
+		//=====
+
+		Texture2D CreateTexture2D(int width, int height) 
+		{
+			return new Texture2D(width, height);
+		}
+
+		RenderTexture CreateRenderTexture(int width, int height) 
+		{
+			RenderTexture texture = new RenderTexture(width, height, 0, RenderTextureFormat.ARGB32);
+            texture.enableRandomWrite = true;
+            texture.useMipMap = false;
+            texture.mipMapBias = 0;
+		    texture.filterMode = FilterMode.Point;
+            texture.Create();
+			return texture;
+		}
+
+		int sizeFloat(int size)
+        {
+            return sizeof(float) * size;
+        }
+
+        int sizeInt(int size)
+        {
+            return sizeof(int) * size;
+        }
+
+        int sizeBool(int size)
+        {
+            return sizeof(bool) * size;
+        }
+
+        int sizeColor(int size)
+        {
+            return Marshal.SizeOf(typeof(Color)) * size;
+        }
+
+        int sizeVector3(int size)
+        {
+            return Marshal.SizeOf(typeof(Vector3)) * size;
+        }
+	}
+
+	public struct Vertex 
+	{
+		public int id;
+		public Vector3 position;
+		public Color color;
+	}
+}
